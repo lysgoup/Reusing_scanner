@@ -1,0 +1,43 @@
+# UniBench targets built with this repo's toolchain instead of Angora's.
+#
+# The recipes are Reusing-unibench_build/angora-reusing-target/Dockerfile's,
+# with three substitutions:
+#
+#   /angora/bin        -> /reusing-scanner/bin
+#   /angora/tools      -> /reusing-scanner/tools
+#   FROM yunseo/angora-reusing -> FROM reusing-scanner
+#
+# Each target is built twice: once plain (the "fast" binary the forkserver
+# drives) and once with USE_TRACK=1 (the DFSan binary taint_scan runs). This
+# file carries one target as a worked example -- extend it by copying a block
+# out of that Dockerfile and applying the same three substitutions.
+
+FROM reusing-scanner
+
+ENV CC=/reusing-scanner/bin/angora-clang
+ENV CXX=/reusing-scanner/bin/angora-clang++
+
+RUN apt-get update && apt-get install -y wget xz-utils && apt-get clean
+RUN mkdir -p /d/p/fast /d/p/taint
+
+# --- mujs ------------------------------------------------------------------
+RUN cd / && wget -q https://github.com/ccxvii/mujs/archive/refs/tags/1.0.2.tar.gz -O mujs.tar.gz && \
+    tar xf mujs.tar.gz && rm mujs.tar.gz && mv mujs-1.0.2 /unibench_mujs
+
+# The abilist tells DFSan which library functions to discard taint through.
+# Generated from whatever the fast binary actually links, same recipe as
+# angora-reusing-target/Dockerfile's.
+RUN cd /unibench_mujs && export ANGORA_PASS_LOG_DIR=$(pwd) && \
+    CC=/reusing-scanner/bin/angora-clang build=debug make -j && \
+    cp build/debug/mujs /d/p/fast/mujs && make clean
+
+RUN ldd /d/p/fast/mujs | grep '\.so' | awk '{print $3}' | grep '\.so' | sort -u | \
+      grep -vE 'libgcc_s\.so|libstdc\+\+\.so|libc\.so|libm\.so|libpthread\.so' | \
+      xargs -r -i /reusing-scanner/tools/gen_library_abilist.sh '{}' discard \
+      >> /tmp/abilist.txt; \
+    touch /tmp/abilist.txt
+ENV ANGORA_TAINT_RULE_LIST=/tmp/abilist.txt
+
+RUN cd /unibench_mujs && export ANGORA_PASS_LOG_DIR=$(pwd) && \
+    USE_TRACK=1 CC=/reusing-scanner/bin/angora-clang build=debug make -j1 && \
+    cp build/debug/mujs /d/p/taint/mujs && make clean

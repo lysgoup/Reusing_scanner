@@ -1,0 +1,41 @@
+[package]
+name = "reusing-scanner"
+version = "0.1.0"
+edition = "2018"
+description = "One-shot taint scan over a seed corpus, writing afl-fuzz -r's cache"
+
+# The copied sources say `use angora::...` and `extern crate angora`. Keeping
+# the library's name means not one of them had to be touched.
+[lib]
+name = "angora"
+path = "src/lib.rs"
+
+[[bin]]
+name = "taint_scan"
+path = "src/bin/taint_scan.rs"
+
+# angora/fuzzer's list, minus what only the fuzzing loop pulled in:
+#   clap      -- taint_scan parses argv itself (env::args)
+#   ctrlc     -- only fuzz_main installed a handler
+#   num_cpus  -- only bind_cpu counted them
+#   bincode   -- the one caller (get_log_data) moved to the runtime crate
+[dependencies]
+log = "0.4"
+pretty_env_logger = "0.4"
+rand = "0.7"
+libc = "0.2"
+wait-timeout = "0.2"
+byteorder = "1.2"
+chrono = "0.4"
+priority-queue = "1.0"
+derive_more = "0.99"
+colored = "2.0"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+lazy_static = "1.1"
+memmap = "0.7.0"
+twoway = "0.2.0"
+
+angora_common = { path = "../common" }
+runtime = { path = "../runtime" }

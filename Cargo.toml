@@ -1,0 +1,12 @@
+# Reusing scanner -- a one-shot taint scan over a seed corpus, writing the
+# cache afl-fuzz -r reads.
+#
+# The analysis is Angora's, carried here unmodified: this workspace is the
+# subset of angora/{common,fuzzer} that Executor::track -> load_track_data ->
+# Depot::add_entries actually reaches, with the fuzzing loop (mut_input,
+# search, fuzz_loop, fuzz_main) left behind. Nothing in the copied files was
+# edited; see scanner/src/lib.rs for what was dropped and why.
+
+[workspace]
+members = ["common", "runtime", "runtime_fast", "scanner"]
+resolver = "1"
