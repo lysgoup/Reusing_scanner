@@ -1,4 +1,5 @@
 /target/
 /bin/
+/_build_cache/
 Cargo.lock
 llvm_mode/build/
