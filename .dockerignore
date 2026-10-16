@@ -1,0 +1,13 @@
+# The image's `COPY . reusing-scanner` pulls this whole directory in, so
+# anything that changes between builds without the scanner itself changing has
+# to stay out. Chief offender: _build_cache/scanner.hash, which
+# Reusing-unibench_build's tools/build.sh rewrites after every successful
+# build -- leaving it in meant the COPY layer, and the LLVM and Rust installs
+# cached above it, were invalidated on every single run.
+_build_cache/
+.git/
+
+# Host build output; the image builds its own.
+target/
+bin/
+llvm_mode/build/
