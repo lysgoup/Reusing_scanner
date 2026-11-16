@@ -80,6 +80,9 @@ public:
 
   //cmpid 로그 파일
   std::ofstream cmpid_log_file;
+  // The same ids, tab-separated with the module, the compile directory and
+  // the function: cmpid_track.map / cmpid_fast.map beside the .txt.
+  std::ofstream cmpid_map_file;
 
   MDNode *ColdCallWeights;
 
@@ -171,6 +174,7 @@ u32 AngoraLLVMPass::getRandomInstructionId() { return getRandomNum(); }
 u32 AngoraLLVMPass::getInstructionId(Instruction *Inst, const char *InstType) {
   u32 h = 0;
   std::string filename = "unknown";
+  std::string directory;
   u32 Line = 0;
   u32 Col = 0;
   bool has_debug_info = false;
@@ -179,6 +183,7 @@ u32 AngoraLLVMPass::getInstructionId(Instruction *Inst, const char *InstType) {
   DILocation *Loc = Inst->getDebugLoc();
   if (Loc) {
     filename = cast<DIScope>(Loc->getScope())->getFilename().str();
+    directory = cast<DIScope>(Loc->getScope())->getDirectory().str();
     Line = Loc->getLine();
     Col = Loc->getColumn();
     has_debug_info = true;
@@ -212,6 +217,14 @@ u32 AngoraLLVMPass::getInstructionId(Instruction *Inst, const char *InstType) {
           cmpid_log_file << h << ": [no-debug-info], 0, 0, [" << InstType << "]\n";
       }
       cmpid_log_file.flush();
+  }
+  if (cmpid_map_file.is_open()) {
+    Function *F = Inst->getFunction();
+    cmpid_map_file << h << "\t" << ModName << "\t" << directory << "\t"
+                   << (has_debug_info ? filename : "") << "\t" << Line << "\t"
+                   << Col << "\t" << (F ? F->getName().str() : "") << "\t"
+                   << InstType << "\n";
+    cmpid_map_file.flush();
   }
 
   if (output_cond_loc) {
@@ -877,6 +890,8 @@ bool AngoraLLVMPass::runOnModule(Module &M) {
   } else {
     errs() << "Warning: Could not open cmpid_log.txt at " << log_path << "\n";
   }
+  std::string map_path = log_path.substr(0, log_path.size() - 4) + ".map";
+  cmpid_map_file.open(map_path, std::ios::out | std::ios::app);
 
   if (DFSanMode)
     return true;
@@ -932,6 +947,8 @@ bool AngoraLLVMPass::runOnModule(Module &M) {
     cmpid_log_file.close();
     OKF("cmpid_log.txt closed, total unique IDs: %zu", UniqCidSet.size());
   }
+  if (cmpid_map_file.is_open())
+    cmpid_map_file.close();
 
   return true;
 }

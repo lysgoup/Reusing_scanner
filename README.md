@@ -6,6 +6,15 @@ One-shot taint scan over a seed corpus. Writes the cache `afl-fuzz -r` reads:
     <out>/unsolved_condition     (cmpid, context, order) sites seen one way only
     <out>/<seed>.dtaint          per seed: which sites depend on which bytes
 
+and, beside it, two records for reading the results back (the fuzzers ignore
+them):
+
+    <out>/value_pool.origin      per entry: the seed, site and byte ranges its
+                                 value was first seen at
+    <out>/cmpid_map.tsv          cmpid -> source file, line, column, function;
+                                 from the pass's map of the track binary,
+                                 ANGORA_CMPID_MAP or <track_target>.cmpid.map
+
 Self-contained: the compiler that instruments a target and the scanner that
 runs it are both here.
 

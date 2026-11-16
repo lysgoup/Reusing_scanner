@@ -24,6 +24,43 @@ pub struct CondRecord {
     // pub arg2: u64,
     pub offsets: Vec<TagSeg>,
     pub critical_values: Vec<Vec<u8>>,
+    // Where the value was first seen: the pool keeps a value once, from its
+    // first sighting (see `seen`), and this is that sighting. taint_scan
+    // writes it out as value_pool.origin.
+    #[serde(default)]
+    pub origin: ValueOrigin,
+}
+
+/// Where a pool value came from.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ValueOrigin {
+    /// The input being scanned (taint_scan's seed file name; empty outside
+    /// taint_scan).
+    pub seed: String,
+    /// The comparison site, with cmpid on the record.
+    pub context: u32,
+    pub order: u32,
+    /// "input": the value is that input's bytes at the record's offsets.
+    /// "magic": the value is the comparison's constant side, laid out in the
+    /// byte order the input's bytes at the offsets were read in.
+    pub kind: String,
+    /// Which operand's offsets, for an "input" value: 0 single-label, 1 or 2
+    /// for the first or second of a dual-label comparison.
+    pub operand: u8,
+}
+
+lazy_static! {
+    // The input taint_scan is scanning, stamped on every record it adds.
+    static ref CURRENT_SEED: Mutex<String> = Mutex::new(String::new());
+}
+
+/// Names the input whose comparisons are about to be added (taint_scan).
+pub fn set_current_seed(name: &str) {
+    *CURRENT_SEED.lock().unwrap() = name.to_string();
+}
+
+fn current_seed() -> String {
+    CURRENT_SEED.lock().unwrap().clone()
 }
 
 #[derive(Debug, Default, Clone)]
@@ -202,7 +239,8 @@ fn pool_insert(pool: &mut MagicBytePool, value: Vec<u8>, cmpid: u32) {
     }
 }
 
-fn insert_magic_byte_value(pattern: LabelPattern, magic: Vec<u8>, tainted: Vec<u8>, cmpid: u32, offsets: Vec<TagSeg>) {
+fn insert_magic_byte_value(pattern: LabelPattern, magic: Vec<u8>, tainted: Vec<u8>, cmpid: u32,
+                           context: u32, order: u32, offsets: Vec<TagSeg>) {
     // known loop-counter cmpids skip LABEL_PATTERN_MAP entirely -- flagged by
     // flag_loop_counters_in_batch before this ever runs. LOOP_COUNTER_MAP's
     // own keys ARE the "known loop-counter cmpid" set, so this is a plain
@@ -225,7 +263,8 @@ fn insert_magic_byte_value(pattern: LabelPattern, magic: Vec<u8>, tainted: Vec<u
     let pool = map.entry(pattern).or_insert_with(LabelPatternPool::default);
     let critical_values = vec![magic];
     if pool.seen.insert(critical_values.clone()) {
-        pool.records.push(CondRecord { cmpid, offsets, critical_values });
+        let origin = ValueOrigin { seed: current_seed(), context, order, kind: "magic".into(), operand: 0 };
+        pool.records.push(CondRecord { cmpid, offsets, critical_values, origin });
     }
 }
 
@@ -391,7 +430,8 @@ pub fn add_magic_byte_records(
 
         if let Some((magic, tainted)) = extract_magic_and_tainted(cond, buf) {
             let offsets = merge_continuous_segments(&cond.offsets);
-            insert_magic_byte_value(pattern, magic, tainted, cond.base.cmpid, offsets);
+            insert_magic_byte_value(pattern, magic, tainted, cond.base.cmpid,
+                                    cond.base.context, cond.base.order, offsets);
         }
     }
 
@@ -407,6 +447,7 @@ pub fn add_magic_byte_records(
         let mut run_magic: Vec<u8> = Vec::new();
         let mut run_tainted: Vec<u8> = Vec::new();
         let mut run_cmpid: u32 = 0;
+        let (mut run_context, mut run_order) = (0u32, 0u32);
         // keys of the members feeding the run being built, so a flush can tell
         // each of them which span it was actually filed under
         let mut run_keys: Vec<(u32, u32, u32)> = Vec::new();
@@ -421,6 +462,8 @@ pub fn add_magic_byte_records(
                 Some((m, t)) => {
                     if run_magic.is_empty() {
                         run_cmpid = cond.base.cmpid;
+                        run_context = cond.base.context;
+                        run_order = cond.base.order;
                     }
                     run_magic.extend_from_slice(&m);
                     run_tainted.extend_from_slice(&t);
@@ -434,7 +477,8 @@ pub fn add_magic_byte_records(
                         for k in &run_keys {
                             stored_spans.insert(*k, offsets[0]);
                         }
-                        insert_magic_byte_value(pattern, run_magic.clone(), run_tainted.clone(), run_cmpid, offsets);
+                        insert_magic_byte_value(pattern, run_magic.clone(), run_tainted.clone(), run_cmpid,
+                                                run_context, run_order, offsets);
                     }
                     run_magic.clear();
                     run_tainted.clear();
@@ -449,7 +493,8 @@ pub fn add_magic_byte_records(
             for k in &run_keys {
                 stored_spans.insert(*k, offsets[0]);
             }
-            insert_magic_byte_value(pattern, run_magic, run_tainted, run_cmpid, offsets);
+            insert_magic_byte_value(pattern, run_magic, run_tainted, run_cmpid,
+                                    run_context, run_order, offsets);
         }
     }
 
@@ -592,6 +637,13 @@ fn create_single_record(
       // arg2: cond.base.arg2,
       offsets: offsets.clone(),
       critical_values: critical_values.clone(),
+      origin: ValueOrigin {
+          seed: current_seed(),
+          context: cond.base.context,
+          order: cond.base.order,
+          kind: "input".into(),
+          operand: operand_num,
+      },
   };
 
   pool.records.push(record);
